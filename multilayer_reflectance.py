@@ -98,7 +98,7 @@ def main():
     wl_min, wl_max, points = 400e-9, 1000e-9, 500
     wl = np.linspace(wl_min, wl_max, points)
     k0 = 2*np.pi / wl
-    theta = 30.0  # normal incidence
+    theta = 30.0  # incidence angle (degrees)
     kp = n_list[0] * k0 * np.sin(theta)
 
     # --- Vectorised: compute reflectance for all wavelengths at once ---
