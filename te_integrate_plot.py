@@ -132,7 +132,7 @@ def gyy_TE_rho(
     # --- Bessel factor ---
     J0 = J0_series(kps_dev * rho)
     J2 = J2_series(kps_dev * rho)
-    pref = 1.0 / xp.asarray(np.pi)
+    pref = 1.0 / np.pi
 
     # --- two integrands ---
     integrand_1 = kps_dev * J0 * Gyykp

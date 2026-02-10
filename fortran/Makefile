@@ -1,5 +1,5 @@
-! Makefile for compiling Fortran optics codes
-! Supports OpenMP for CPU parallelism on multi-core CPUs (e.g. Xeon w5-3423)
+# Makefile for compiling Fortran optics codes
+# Supports OpenMP for CPU parallelism on multi-core CPUs (e.g. Xeon w5-3423)
 
 FC = gfortran
 FFLAGS = -O2 -Wall -std=f2008 -fopenmp

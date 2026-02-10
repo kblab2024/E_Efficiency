@@ -301,7 +301,7 @@ def gxz_TM(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp):
         RF = R_down[layer_src]
         RB = R_up[layer_src]
 
-        sgn = float(xp.sign(z_obs - z_src))
+        sgn = 1.0 if (z_obs - z_src) > 0 else -1.0
 
         # NOTE: keep exactly this structure (no extra pref outside)
         Gxz = ( -sgn * xp.exp(-q * k0 * abs(z_obs - z_src)) 
@@ -373,7 +373,7 @@ def gzx_TM(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp):
         RF = R_down[layer_src]
         RB = R_up[layer_src]
 
-        sgn = float(xp.sign(z_obs - z_src))
+        sgn = 1.0 if (z_obs - z_src) > 0 else -1.0
 
         gzx = ( -1j * kp / (2 * k0**2) * sgn * xp.exp(-q * k0 * abs(z_obs - z_src))
             + (1j * kp / q) * ( - xp.exp(+q * k0 * z_obs) * RF * f1x_src + xp.exp(-q * k0 * z_obs) * RB * f2x_src ))
@@ -454,7 +454,7 @@ def dgxx_dzobs_TM( n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp, t
                 "Move the observation surface away from the source location."
             )
 
-        s = float(xp.sign(dz))  # now guaranteed to be ±1 for real dz
+        s = 1.0 if dz > 0 else -1.0
 
         # direct = (-q/(2*k0*eps)) * exp(-a*|dz|)
         # ddirect = (q^2/(2*eps)) * exp(-a*|dz|) * sign(dz)

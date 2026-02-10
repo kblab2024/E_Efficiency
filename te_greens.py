@@ -160,7 +160,7 @@ def TE_f1yf2y_same_layer(q_list, R_down, R_up, layer_src, z_src, k0):
 # ------------------------------------------------------------
 # Level 4: propagate to another layer
 # ------------------------------------------------------------
-def propagate_down_TE(f1_src, q_list, R_down, R_up, layer_src, layer_obs, k0, d_list):
+def propagate_down_TE(f1_src, q_list, R_down, layer_src, layer_obs, k0, d_list):
     if layer_obs <= layer_src:
         raise ValueError("propagate_down_TE requires layer_obs > layer_src")
 
@@ -267,7 +267,7 @@ def dgyy_dzobs_TE(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp,tol: f
                 "Move the observation surface away from the source location."
             )
 
-        s = float(xp.sign(dz))  # ±1 for real dz
+        s = 1.0 if dz > 0 else -1.0
 
         # direct = (1/(2 q k0)) * exp(-a*|dz|)
         # ddirect = (1/(2 q k0)) * exp(-a|dz|) * (-a*sign(dz)) = -(1/2)*exp(-a|dz|)*sign(dz)
