@@ -14,6 +14,12 @@ defined in te_greens.py, to ensure identical definitions of:
 
 Only TM-specific source normalization, propagation, and assembly
 are implemented here.
+
+Vectorised for Apple Silicon M3:
+    All functions accept arrays of kp values (shape ``(M,)``).
+    Scalar kp still works transparently.
+    On macOS / Apple Silicon, NumPy uses the Accelerate framework
+    for vectorised math (NEON SIMD + AMX co-processor).
 """
 
 import numpy as np

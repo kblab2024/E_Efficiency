@@ -13,10 +13,12 @@ using only numpy and matplotlib (no scipy).
 Math (2D in-plane Fourier/Bessel transform):
     G_yy(rho) = (1/(2π)) ∫_0^{∞} k_parallel * J0(k_parallel*rho) * G_yy(k_parallel) dk_parallel
 
-Notes:
-    - In te_greens.py, q_list is dimensionless and exponentials use exp(q*k0*z).
-      Here, kp has physical dimension (1/length), rho has length.
-    - You choose k_parallel_max and quadrature settings.
+Vectorised for Apple Silicon M3:
+    All per-kp Python loops have been replaced with single
+    batch calls that pass the entire kp array at once.
+    NumPy dispatches the heavy lifting to BLAS/Accelerate on
+    macOS (NEON + AMX).  When ``mlx`` is installed the backend
+    can optionally run on the Apple GPU.
 """
 
 from __future__ import annotations
@@ -111,52 +113,41 @@ def gyy_TE_rho(
     dk  = k_parallel_max / num_k
     kps = (np.arange(num_k, dtype=float) + 0.5) * dk
 
-    # --- Gyy(kp) ---
-    Gyykp = np.empty_like(kps, dtype=np.complex128)
-    for i, kp in enumerate(kps):
-        Gyykp[i] = gyy_TE(
-            n_list, d_list,
-            layer_src, z_src,
-            layer_obs, z_obs,
-            k0, kp
-        )
+    # --- Vectorised batch calls (all kp values at once) ---
+    Gyykp = gyy_TE(
+        n_list, d_list,
+        layer_src, z_src,
+        layer_obs, z_obs,
+        k0, kps
+    )
 
-    # --- d/dz_obs Gyy(kp) ---
-    DGyykp = np.empty_like(kps, dtype=np.complex128)
-    for i, kp in enumerate(kps):
-        DGyykp[i] = dgyy_dzobs_TE(
-            n_list, d_list,
-            layer_src, z_src,
-            layer_obs, z_obs,
-            k0, kp
-        )
+    DGyykp = dgyy_dzobs_TE(
+        n_list, d_list,
+        layer_src, z_src,
+        layer_obs, z_obs,
+        k0, kps
+    )
 
-    Gxxkp = np.empty_like(kps, dtype=np.complex128)
-    for i, kp in enumerate(kps):
-        Gxxkp[i] = gxx_TM(
-             n_list, d_list,
-            layer_src, z_src,
-             layer_obs, z_obs,
-             k0, kp
-        )
+    Gxxkp = gxx_TM(
+        n_list, d_list,
+        layer_src, z_src,
+        layer_obs, z_obs,
+        k0, kps
+    )
 
-    DGxxkp = np.empty_like(kps, dtype=np.complex128)
-    for i, kp in enumerate(kps):
-        DGxxkp[i] = dgxx_dzobs_TM(
-            n_list, d_list,
-            layer_src, z_src,
-            layer_obs, z_obs,
-            k0, kp
-        )
+    DGxxkp = dgxx_dzobs_TM(
+        n_list, d_list,
+        layer_src, z_src,
+        layer_obs, z_obs,
+        k0, kps
+    )
 
-    Gzxkp = np.empty_like(kps, dtype=np.complex128)
-    for i, kp in enumerate(kps):
-        Gzxkp[i] = gzx_TM(
-            n_list, d_list,
-            layer_src, z_src,
-            layer_obs, z_obs,
-            k0, kp
-        )
+    Gzxkp = gzx_TM(
+        n_list, d_list,
+        layer_src, z_src,
+        layer_obs, z_obs,
+        k0, kps
+    )
 
     # --- Bessel factor ---
     J0 = J0_series(kps * rho)
