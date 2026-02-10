@@ -106,12 +106,20 @@ def gyy_TE_rho(
     rho: float,
     k_parallel_max: float,
     num_k: int,
-    use_trapz: bool = True,
+    use_trapz: bool = False,
 ) -> complex:
 
-    # --- midpoint grid (avoid hitting branch point exactly) ---
-    dk  = k_parallel_max / num_k
-    kps = (np.arange(num_k, dtype=float) + 0.5) * dk
+    # --- choose grid ---
+    if use_trapz:
+        # midpoint grid (avoid hitting branch point exactly)
+        dk  = k_parallel_max / num_k
+        kps = (np.arange(num_k, dtype=float) + 0.5) * dk
+    else:
+        # endpoint grid required for Simpson's rule
+        if num_k % 2 == 0:
+            raise ValueError("Simpson needs odd num_k. Set num_k to an odd integer or use_trapz=True.")
+        kps = np.linspace(0.0, k_parallel_max, num_k)
+        kps[0] = kps[1] * 1e-6  # nudge away from 0 to avoid branch-point singularity
 
     # --- Vectorised batch calls (all kp values at once) ---
     Gyykp = gyy_TE(
@@ -168,24 +176,19 @@ def gyy_TE_rho(
 
     # --- integrate ---
     if use_trapz:
-        I1 = pref * np.trapz(integrand_1, kps)
-        I2 = pref * np.trapz(integrand_2, kps)
-        I3 = pref * np.trapz(integrand_3, kps)  
-        I4 = pref * np.trapz(integrand_4, kps)
-        I5 = pref * np.trapz(integrand_5, kps)
-        I6 = pref * np.trapz(integrand_6, kps)
-        I7 = pref * np.trapz(integrand_7, kps)
-        I8 = pref * np.trapz(integrand_8, kps)
-        I9 = pref * np.trapz(integrand_9, kps)
-        I10 = pref * np.trapz(integrand_10, kps)
-        return I1*I2 + I3*I4 + I5*I6 + I7*I8 + 1j*I5*I9 + 1j*I5*I10 + I5*I2 + I7*I4 + I1*I6+ I3*I8 + 1j*I1*I9 + 1j*I1*I10   
+        I1 = pref * np.trapezoid(integrand_1, kps)
+        I2 = pref * np.trapezoid(integrand_2, kps)
+        I3 = pref * np.trapezoid(integrand_3, kps)
+        I4 = pref * np.trapezoid(integrand_4, kps)
+        I5 = pref * np.trapezoid(integrand_5, kps)
+        I6 = pref * np.trapezoid(integrand_6, kps)
+        I7 = pref * np.trapezoid(integrand_7, kps)
+        I8 = pref * np.trapezoid(integrand_8, kps)
+        I9 = pref * np.trapezoid(integrand_9, kps)
+        I10 = pref * np.trapezoid(integrand_10, kps)
+        return I1*I2 + I3*I4 + I5*I6 + I7*I8 + 1j*I5*I9 + 1j*I5*I10 + I5*I2 + I7*I4 + I1*I6+ I3*I8 + 1j*I1*I9 + 1j*I1*I10
 
-    # If you ever turn on Simpson later, you'd want an endpoint grid (not midpoint).
-    # For now keep your original guard:
-    if num_k % 2 == 0:
-        raise ValueError("Simpson needs odd num_k. Set num_k to an odd integer or use_trapz=True.")
-
-    h = (k_parallel_max - 0.0) / (num_k - 1)  # 你說今晚先別管它 OK
+    h = (k_parallel_max - 0.0) / (num_k - 1)
     S1 = integrand_1[0] + integrand_1[-1] + 4.0 * np.sum(integrand_1[1:-1:2]) + 2.0 * np.sum(integrand_1[2:-2:2])
     S2 = integrand_2[0] + integrand_2[-1] + 4.0 * np.sum(integrand_2[1:-1:2]) + 2.0 * np.sum(integrand_2[2:-2:2])
     S3 = integrand_3[0] + integrand_3[-1] + 4.0 * np.sum(integrand_3[1:-1:2]) + 2.0 * np.sum(integrand_3[2:-2:2])
@@ -244,7 +247,7 @@ def demo_plot_TE():
             rho=float(r),
             k_parallel_max=k_parallel_max,
             num_k=num_k,
-            use_trapz=True,
+            use_trapz=False,
         )
         for r in rhos
     ], dtype=np.complex128)
