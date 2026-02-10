@@ -58,6 +58,14 @@ def to_numpy(a) -> np.ndarray:
     return np.asarray(a)
 
 
+def from_numpy(a):
+    """Convert a NumPy array to the active backend's array type."""
+    if _backend == "mlx":
+        import mlx.core as mx      # type: ignore[import-untyped]
+        return mx.array(np.asarray(a))
+    return np.asarray(a)
+
+
 # ------------------------------------------------------------------
 # Public info dict
 # ------------------------------------------------------------------
