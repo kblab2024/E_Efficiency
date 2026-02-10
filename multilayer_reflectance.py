@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from gpu_config import xp
 import numpy as np
 import matplotlib.pyplot as plt
 def r_te(qi, qj):
@@ -15,19 +16,21 @@ def RF_multilayer(n_list, d_list, polarization, k0, kp, target_layer):
     n_list: [n1, n2, ..., nN] (N layers, last is substrate)
     d_list: [d1, d2, ..., d_{N-1}] (thicknesses, last has no thickness)
     target_layer: index where you站著往下看 (0-based)
+
+    kp can be a scalar or an array (vectorised over k_parallel).
     """
     e_list = [n**2 for n in n_list]
-    kp2 = kp**2
-    r_eff = 0.0 + 0.0j
+    kp2 = xp.asarray(kp, dtype=xp.complex128)**2
+    r_eff = xp.zeros_like(kp2)
 
     # 從最底層往上到 target_layer
     for L in range(len(n_list)-1, target_layer, -1):
         eps_up   = e_list[L-1]
         eps_down = e_list[L]
 
-        q_up   = np.sqrt(kp2 - eps_up   * k0**2 + 0j) / k0
-        q_down = np.sqrt(kp2 - eps_down * k0**2 + 0j) / k0
-        xL     = np.exp(-q_up * k0 * d_list[L-1])
+        q_up   = xp.sqrt(kp2 - eps_up   * k0**2) / k0
+        q_down = xp.sqrt(kp2 - eps_down * k0**2) / k0
+        xL     = xp.exp(-q_up * k0 * d_list[L-1])
 
         if polarization.upper() == "TE":
             wn = q_down / q_up
@@ -51,19 +54,21 @@ def RB_multilayer(n_list, d_list, polarization, k0, kp, target_layer):
     n_list: [n1, n2, ..., nN] (N layers, last is substrate)
     d_list: [d1, d2, ..., d_{N-1}] (thicknesses, last has no thickness)
     target_layer: index where you站著往上看 (0-based)
+
+    kp can be a scalar or an array (vectorised over k_parallel).
     """
     e_list = [n**2 for n in n_list]
-    kp2 = kp**2
-    r_eff = 0.0 + 0.0j
+    kp2 = xp.asarray(kp, dtype=xp.complex128)**2
+    r_eff = xp.zeros_like(kp2)
 
     # 從最上層往下到 target_layer
     for L in range(0, target_layer):
         eps_up   = e_list[L]
         eps_down = e_list[L+1]
 
-        q_up   = np.sqrt(kp2 - eps_up   * k0**2 + 0j) / k0
-        q_down = np.sqrt(kp2 - eps_down * k0**2 + 0j) / k0
-        xL     = np.exp(-q_up * k0 * d_list[L])
+        q_up   = xp.sqrt(kp2 - eps_up   * k0**2) / k0
+        q_down = xp.sqrt(kp2 - eps_down * k0**2) / k0
+        xL     = xp.exp(-q_up * k0 * d_list[L])
 
         if polarization.upper() == "TE":
             wn = q_up / q_down

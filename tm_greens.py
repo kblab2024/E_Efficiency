@@ -14,8 +14,12 @@ defined in te_greens.py, to ensure identical definitions of:
 
 Only TM-specific source normalization, propagation, and assembly
 are implemented here.
+
+All functions accept kp as a scalar or array for GPU-accelerated batch
+evaluation over k_parallel using CuPy (GPU) or NumPy (CPU).
 """
 
+from gpu_config import xp
 import numpy as np
 
 # ------------------------------------------------------------
@@ -39,9 +43,10 @@ def TM_f1xf2x_same_layer(q_list, R_down, R_up, layer_src, z_src, k0, kp):
     RF = R_down[layer_src]
     RB = R_up[layer_src]
 
+    kp = xp.asarray(kp, dtype=xp.complex128)
     e2 = (kp**2 - (q * k0)**2) / (k0**2)
-    ez  = np.exp(+q * k0 * z_src)
-    emz = np.exp(-q * k0 * z_src)
+    ez  = xp.exp(+q * k0 * z_src)
+    emz = xp.exp(-q * k0 * z_src)
 
     den = 2 * e2 * (k0 / q) * (1 - RF * RB)
     f1x = -(ez  + emz * RB) / den
@@ -54,9 +59,10 @@ def TM_df1xdf2x_same_layer(q_list, R_down, R_up, layer_src, z_src, k0, kp):
     RF = R_down[layer_src]
     RB = R_up[layer_src]
 
+    kp = xp.asarray(kp, dtype=xp.complex128)
     e2 = (kp**2 - (q * k0)**2) / (k0**2)
-    ez  = np.exp(+q * k0 * z_src)   # E_+
-    emz = np.exp(-q * k0 * z_src)   # E_-
+    ez  = xp.exp(+q * k0 * z_src)   # E_+
+    emz = xp.exp(-q * k0 * z_src)   # E_-
 
     den = 2 * e2 * (k0 / q) * (1 - RF * RB)
     df1x = -(q*k0) * (ez - RB*emz) / den
@@ -69,9 +75,10 @@ def TM_f1zf2z_same_layer(q_list, R_down, R_up, layer_src, z_src, k0, kp):
     q  = q_list[layer_src]
     RF = R_down[layer_src]
     RB = R_up[layer_src]
+    kp = xp.asarray(kp, dtype=xp.complex128)
     e2 = (kp**2 - (q * k0)**2) / (k0**2)
-    ez  = np.exp(+q * k0 * z_src)
-    emz = np.exp(-q * k0 * z_src)
+    ez  = xp.exp(+q * k0 * z_src)
+    emz = xp.exp(-q * k0 * z_src)
     den = (2 * k0**2 * e2 / (1j * kp)) * (1 - RF * RB)
     f1z = ( ez  - emz * RB ) / den
     f2z = (-emz + ez  * RF ) / den
@@ -97,7 +104,7 @@ def propagate_down_TM(f1_src, q_list, R_down, layer_src, layer_obs,k0, d_list, e
         wq = 1.0 - wn        # M_l^-
         Rnext = R_down[l + 1]
         T = 1.0 / (wp + wq * Rnext)
-        x = np.exp(-ql * k0 * d_l)
+        x = xp.exp(-ql * k0 * d_l)
         f = T * x * f
 
     return f
@@ -122,7 +129,7 @@ def propagate_up_TM(f2_src, q_list, R_up, layer_src, layer_obs,k0, d_list, eps_l
         mp = 1.0 + wn     # m^+
         mm = 1.0 - wn     # m^-
         r_l = R_up[l]
-        x = np.exp(-ql * k0 * d_l)
+        x = xp.exp(-ql * k0 * d_l)
         T = 1.0 / (mp + mm * x * r_l * x)
         f = x * T * f
 
@@ -134,7 +141,7 @@ def propagate_up_TM(f2_src, q_list, R_up, layer_src, layer_obs,k0, d_list, eps_l
 # ------------------------------------------------------------
 def gxx_TM(n_list, d_list, layer_src, z_src,layer_obs, z_obs,k0, kp):
 
-    eps_list = np.array(n_list, dtype=complex)**2
+    eps_list = xp.array(n_list, dtype=xp.complex128)**2
     q_list   = compute_q_list(n_list, k0, kp)
     R_down = compute_RF_all(n_list, d_list, k0, kp, polarization="TM")
     R_up   = compute_RB_all(n_list, d_list, k0, kp, polarization="TM")
@@ -153,9 +160,9 @@ def gxx_TM(n_list, d_list, layer_src, z_src,layer_obs, z_obs,k0, kp):
         RF  = R_down[layer_src]
         RB  = R_up[layer_src]
 
-        direct = (-q / (2.0 * k0 * eps)) * np.exp(-q * k0 * np.abs(z_obs - z_src))
-        refl   = (np.exp(+q * k0 * z_obs) * RF * f1x_src
-                  + np.exp(-q * k0 * z_obs) * RB * f2x_src)
+        direct = (-q / (2.0 * k0 * eps)) * xp.exp(-q * k0 * abs(z_obs - z_src))
+        refl   = (xp.exp(+q * k0 * z_obs) * RF * f1x_src
+                  + xp.exp(-q * k0 * z_obs) * RB * f2x_src)
         Gxx = direct + refl
         return Gxx
 
@@ -168,7 +175,7 @@ def gxx_TM(n_list, d_list, layer_src, z_src,layer_obs, z_obs,k0, kp):
             layer_src, layer_obs,
             k0, d_list, eps_list
         )
-        dress = (np.exp(-q_obs * k0 * z_obs) + np.exp(+q_obs * k0 * z_obs) * RF_obs)
+        dress = (xp.exp(-q_obs * k0 * z_obs) + xp.exp(+q_obs * k0 * z_obs) * RF_obs)
         Gxx = dress * f1x_at_obs_top
         return Gxx
 
@@ -180,7 +187,7 @@ def gxx_TM(n_list, d_list, layer_src, z_src,layer_obs, z_obs,k0, kp):
         layer_src, layer_obs,
         k0, d_list, eps_list
     )
-    dress = (np.exp(+q_obs * k0 * z_obs) + np.exp(-q_obs * k0 * z_obs) * RB_obs)
+    dress = (xp.exp(+q_obs * k0 * z_obs) + xp.exp(-q_obs * k0 * z_obs) * RB_obs)
     Gxx = dress * f2x_at_obs_top
     return Gxx
 
@@ -195,8 +202,9 @@ def gzz_TM(n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp):
       with the rule: ∂_{z'} acts ONLY on f1/f2 (so we propagate df1/df2).
     """
 
-    eps_list = np.array(n_list, dtype=complex)**2
+    eps_list = xp.array(n_list, dtype=xp.complex128)**2
     q_list   = compute_q_list(n_list, k0, kp)
+    kp = xp.asarray(kp, dtype=xp.complex128)
 
     # reflections (TM)
     R_down = compute_RF_all(n_list, d_list, k0, kp, polarization="TM")  # RF_all
@@ -216,8 +224,8 @@ def gzz_TM(n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp):
 
         Gzz = (
             (kp**2) / (2 * k0**3 * eps * q)
-            - (1j * kp / (q * k0)) * np.exp(+q * k0 * z_obs) * RF * f1z
-            + (1j * kp / (q * k0)) * np.exp(-q * k0 * z_obs) * RB * f2z)
+            - (1j * kp / (q * k0)) * xp.exp(+q * k0 * z_obs) * RF * f1z
+            + (1j * kp / (q * k0)) * xp.exp(-q * k0 * z_obs) * RB * f2z)
         return Gzz
 
     # ------------------------------------------------------------
@@ -237,7 +245,7 @@ def gzz_TM(n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp):
         df1x_at_obs_top = propagate_down_TM(df1x_src, q_list, R_down,layer_src, layer_obs,k0, d_list, eps_list)
         # A(z) = exp(-qz) + exp(+qz) RF
         # A'(z)= -q exp(-qz) + q exp(+qz) RF
-        Aprime = (-q_obs* k0) * np.exp(-q_obs * k0 * z_obs) + (q_obs * k0) * np.exp(+q_obs * k0 * z_obs) * RF_obs
+        Aprime = (-q_obs* k0) * xp.exp(-q_obs * k0 * z_obs) + (q_obs * k0) * xp.exp(+q_obs * k0 * z_obs) * RF_obs
         d2Gxx = Aprime * df1x_at_obs_top          # ∂z∂z' Gxx  (per your rule)
         Gzz   = (kp**2 / (q_obs**4 * k0**4)) * d2Gxx      # your prefactor
         return Gzz
@@ -249,7 +257,7 @@ def gzz_TM(n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp):
 
     # B(z) = exp(+qz) + exp(-qz) RB
     # B'(z)= +q exp(+qz) - q exp(-qz) RB
-    Bprime = (q_obs * k0) * np.exp(+q_obs * k0 * z_obs) - (q_obs * k0) * np.exp(-q_obs * k0 * z_obs) * RB_obs
+    Bprime = (q_obs * k0) * xp.exp(+q_obs * k0 * z_obs) - (q_obs * k0) * xp.exp(-q_obs * k0 * z_obs) * RB_obs
     d2Gxx = Bprime * df2x_at_obs_top
     Gzz   = (kp**2 / (q_obs**4 * k0**4)) * d2Gxx
     return Gzz
@@ -267,7 +275,8 @@ def gxz_TM(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp):
           through the denominator in TM_f1zf2z_same_layer().
           Therefore cross-layer terms do NOT multiply an extra prefactor.
     """
-    eps_list = np.array(n_list, dtype=complex)**2
+    eps_list = xp.array(n_list, dtype=xp.complex128)**2
+    kp = xp.asarray(kp, dtype=xp.complex128)
 
     # Level 1
     q_list = compute_q_list(n_list, k0, kp)
@@ -292,12 +301,12 @@ def gxz_TM(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp):
         RF = R_down[layer_src]
         RB = R_up[layer_src]
 
-        sgn = np.sign(z_obs - z_src)
+        sgn = 1.0 if (z_obs - z_src) > 0 else -1.0
 
         # NOTE: keep exactly this structure (no extra pref outside)
-        Gxz = ( -sgn * np.exp(-q * k0 * np.abs(z_obs - z_src)) 
-                     + np.exp(+q * k0 * z_obs) * RF * f1z_src 
-                     + np.exp(-q * k0 * z_obs) * RB * f2z_src)
+        Gxz = ( -sgn * xp.exp(-q * k0 * abs(z_obs - z_src)) 
+                     + xp.exp(+q * k0 * z_obs) * RF * f1z_src 
+                     + xp.exp(-q * k0 * z_obs) * RB * f2z_src)
 
         return Gxz
 
@@ -308,8 +317,8 @@ def gxz_TM(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp):
         f1z_at_obs = propagate_down_TM(f1z_src, q_list, R_down,layer_src, layer_obs,k0, d_list, eps_list)
 
         Gxz = (
-            np.exp(-q_obs * k0 * z_obs) * f1z_at_obs
-            + np.exp(+q_obs * k0 * z_obs) * RF_obs * f1z_at_obs)
+            xp.exp(-q_obs * k0 * z_obs) * f1z_at_obs
+            + xp.exp(+q_obs * k0 * z_obs) * RF_obs * f1z_at_obs)
 
         return Gxz
 
@@ -319,8 +328,8 @@ def gxz_TM(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp):
     f2z_at_obs = propagate_up_TM(f2z_src, q_list, R_up,layer_src, layer_obs,k0, d_list, eps_list)
 
     Gxz = (
-        np.exp(+q_obs * k0 * z_obs) * f2z_at_obs
-        + np.exp(-q_obs * k0 * z_obs) * RB_obs * f2z_at_obs)
+        xp.exp(+q_obs * k0 * z_obs) * f2z_at_obs
+        + xp.exp(-q_obs * k0 * z_obs) * RB_obs * f2z_at_obs)
 
     return Gxz
 
@@ -342,7 +351,8 @@ def gzx_TM(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp):
           and
               Gzx = -(i kp / q^2) ∂_z Gxx
     """
-    eps_list = np.array(n_list, dtype=complex)**2
+    eps_list = xp.array(n_list, dtype=xp.complex128)**2
+    kp = xp.asarray(kp, dtype=xp.complex128)
     q_list   = compute_q_list(n_list, k0, kp)
 
     R_down = compute_RF_all(n_list, d_list, k0, kp, polarization="TM")
@@ -363,10 +373,10 @@ def gzx_TM(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp):
         RF = R_down[layer_src]
         RB = R_up[layer_src]
 
-        sgn = np.sign(z_obs - z_src)
+        sgn = 1.0 if (z_obs - z_src) > 0 else -1.0
 
-        gzx = ( -1j * kp / (2 * k0**2) * sgn * np.exp(-q * k0 * np.abs(z_obs - z_src))
-            + (1j * kp / q) * ( - np.exp(+q * k0 * z_obs) * RF * f1x_src + np.exp(-q * k0 * z_obs) * RB * f2x_src ))
+        gzx = ( -1j * kp / (2 * k0**2) * sgn * xp.exp(-q * k0 * abs(z_obs - z_src))
+            + (1j * kp / q) * ( - xp.exp(+q * k0 * z_obs) * RF * f1x_src + xp.exp(-q * k0 * z_obs) * RB * f2x_src ))
         return gzx
 
     # ============================================================
@@ -379,8 +389,8 @@ def gzx_TM(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp):
         # ∂zGxx = (-q e^{-qz} + q e^{+qz} RF) f1
         # Gzx = -(i kp / q^2) ∂zGxx  -> (-i kp / q) * (-e^{-qz} + e^{+qz} RF) f1
         gzx = (-1j * kp / (q_obs*k0) ) * ( 
-            - np.exp(-q_obs * k0 * z_obs) * f1x_at_obs
-            + np.exp(+q_obs * k0 * z_obs) * RF_obs * f1x_at_obs)
+            - xp.exp(-q_obs * k0 * z_obs) * f1x_at_obs
+            + xp.exp(+q_obs * k0 * z_obs) * RF_obs * f1x_at_obs)
         return gzx
 
     # ============================================================
@@ -392,8 +402,8 @@ def gzx_TM(n_list, d_list,layer_src, z_src,layer_obs, z_obs,k0, kp):
     # ∂zGxx = ( +q e^{+qz} - q e^{-qz} RB) f2
     # Gzx = -(i kp / q^2) ∂zGxx -> (-i kp / q) * ( +e^{+qz} - e^{-qz} RB) f2
     gzx = (-1j * kp / (q_obs*k0) ) * (
-        + np.exp(+q_obs * k0 * z_obs) * f2x_at_obs
-        - np.exp(-q_obs * k0 * z_obs) * RB_obs * f2x_at_obs)
+        + xp.exp(+q_obs * k0 * z_obs) * f2x_at_obs
+        - xp.exp(-q_obs * k0 * z_obs) * RB_obs * f2x_at_obs)
     return gzx
 
 def dgxx_dzobs_TM( n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp, tol: float = 1e-12,):
@@ -404,6 +414,8 @@ def dgxx_dzobs_TM( n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp, t
     (or |z_obs - z_src| < tol), which is appropriate when doing Poynting-flux
     surface integrals: the observation surface should not pass through the source.
 
+    All arrays are vectorised over k_parallel.
+
     Parameters
     ----------
     tol : float
@@ -411,7 +423,8 @@ def dgxx_dzobs_TM( n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp, t
         Tune based on your z units/scale.
     """
 
-    eps_list = np.array(n_list, dtype=complex)**2
+    eps_list = xp.array(n_list, dtype=xp.complex128)**2
+    kp = xp.asarray(kp, dtype=xp.complex128)
     q_list   = compute_q_list(n_list, k0, kp)
 
     R_down = compute_RF_all(n_list, d_list, k0, kp, polarization="TM")
@@ -435,23 +448,23 @@ def dgxx_dzobs_TM( n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp, t
         a  = q * k0
         dz = (z_obs - z_src)
 
-        if np.abs(dz) < tol:
+        if abs(dz) < tol:
             raise ValueError(
                 "dgxx_dzobs_TM (same-layer): |z_obs - z_src| < tol -> cusp at the source.\n"
                 "Move the observation surface away from the source location."
             )
 
-        s = np.sign(dz)  # now guaranteed to be ±1 for real dz
+        s = 1.0 if dz > 0 else -1.0
 
         # direct = (-q/(2*k0*eps)) * exp(-a*|dz|)
         # ddirect = (q^2/(2*eps)) * exp(-a*|dz|) * sign(dz)
-        ddirect = (q*q/(2.0*eps)) * np.exp(-a * np.abs(dz)) * s
+        ddirect = (q*q/(2.0*eps)) * xp.exp(-a * abs(dz)) * s
 
         # refl = exp(+a z_obs)*RF*f1x_src + exp(-a z_obs)*RB*f2x_src
         # drefl = a*( exp(+a z_obs)*RF*f1x_src - exp(-a z_obs)*RB*f2x_src )
         drefl = a * (
-            np.exp(+a * z_obs) * RF * f1x_src
-            - np.exp(-a * z_obs) * RB * f2x_src
+            xp.exp(+a * z_obs) * RF * f1x_src
+            - xp.exp(-a * z_obs) * RB * f2x_src
         )
 
         return ddirect + drefl
@@ -469,7 +482,7 @@ def dgxx_dzobs_TM( n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp, t
         a_obs = q_obs * k0
         # dress = exp(-a_obs z_obs) + exp(+a_obs z_obs)*RF_obs
         # ddress = -a_obs exp(-a_obs z_obs) + a_obs exp(+a_obs z_obs)*RF_obs
-        ddress = (-a_obs) * np.exp(-a_obs * z_obs) + (a_obs) * np.exp(+a_obs * z_obs) * RF_obs
+        ddress = (-a_obs) * xp.exp(-a_obs * z_obs) + (a_obs) * xp.exp(+a_obs * z_obs) * RF_obs
 
         return ddress * f1x_at_obs_top
 
@@ -485,6 +498,6 @@ def dgxx_dzobs_TM( n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kp, t
     a_obs = q_obs * k0
     # dress = exp(+a_obs z_obs) + exp(-a_obs z_obs)*RB_obs
     # ddress = a_obs exp(+a_obs z_obs) - a_obs exp(-a_obs z_obs)*RB_obs
-    ddress = (a_obs) * np.exp(+a_obs * z_obs) + (-a_obs) * np.exp(-a_obs * z_obs) * RB_obs
+    ddress = (a_obs) * xp.exp(+a_obs * z_obs) + (-a_obs) * xp.exp(-a_obs * z_obs) * RB_obs
 
     return ddress * f2x_at_obs_top

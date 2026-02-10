@@ -106,12 +106,13 @@ gfortran -O2 -o test_tm_greens tm_greens.f90 te_greens.o multilayer_reflectance.
 - Double precision (15 digits) is used throughout
 - Complex square roots handle branch cuts correctly with `cmplx()`
 - The code structure follows the 5-level architecture from the Python version
-- Integration routines (trapz, Simpson) would need additional implementation
+- OpenMP is used for CPU parallelism in the rho-array integration loop
+- Set `OMP_NUM_THREADS` to control the number of threads (defaults to all available cores)
 - Plotting functionality requires external tools (gnuplot, matplotlib via Python bridge)
 
 ## Future Work
 
-- Add full integration module for k_parallel integrals
-- Implement parallel computing with OpenMP/MPI
+- Add CUDA/OpenACC kernels for GPU-accelerated k_parallel integration
+- Implement parallel computing with MPI for distributed workloads
 - Add more test cases and validation scripts
 - Create Python wrapper for easy comparison
