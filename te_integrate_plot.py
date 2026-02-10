@@ -10,6 +10,13 @@ Design goal (your workflow):
         (4) plots results
 using numpy, matplotlib, and scipy.
 
+Acceleration:
+    - Bessel functions use ``scipy.special.jv`` (compiled C, accurate
+      for all arguments, replaces the old power-series loops).
+    - Gauss-Legendre nodes/weights use ``scipy.special.roots_legendre``.
+    - When MLX is available (Apple Silicon), the integrand assembly and
+      weighted dot products run on the GPU via ``accel_backend.xp``.
+
 Math (2D in-plane Fourier/Bessel transform):
     G_yy(rho) = (1/(2π)) ∫_0^{∞} k_parallel * J0(k_parallel*rho) * G_yy(k_parallel) dk_parallel
 
@@ -25,7 +32,8 @@ from __future__ import annotations
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.special import roots_legendre
+from scipy.special import roots_legendre, jv
+from accel_backend import xp, to_numpy, from_numpy
 
 # You will keep modifying te_greens.py; we import from it on purpose.
 from te_greens import gyy_TE
@@ -37,64 +45,21 @@ from tm_greens import gzx_TM
 
 def J0_series(x: np.ndarray) -> np.ndarray:
     """
-    Minimal, dependency-free J0(x) approximation (series, stable for small/moderate x).
+    Bessel function of the first kind J0(x).
 
-    J0(x) = Σ_{m=0}^∞ (-1)^m (x^2/4)^m / (m!)^2
-
-    This is fine for plotting / debugging. If you later want faster & more accurate:
-        - use scipy.special.j0
+    Delegates to ``scipy.special.jv`` (compiled C, accurate for all x).
+    The function name is kept for backward compatibility.
     """
-    x = np.asarray(x, dtype=np.complex128)
-    x2_over_4 = (x * x) / 4.0
-
-    # Adaptive-ish truncation: more terms for larger |x|
-    # (still cheap, but don't go crazy)
-    max_abs = float(np.max(np.abs(x)))
-    if max_abs < 5:
-        M = 40
-    elif max_abs < 20:
-        M = 80
-    else:
-        M = 140
-
-    out = np.zeros_like(x, dtype=np.complex128)
-    term = np.ones_like(x, dtype=np.complex128)
-    out += term
-    for m in range(1, M):
-        term *= (-x2_over_4) / (m * m)
-        out += term
-    return out
+    return jv(0, np.asarray(x, dtype=np.complex128))
 
 def J2_series(x: np.ndarray) -> np.ndarray:
     """
-    Minimal, dependency-free J2(x) approximation (series).
+    Bessel function of the first kind J2(x).
 
-    J2(x) = Σ_{m=0}^∞ (-1)^m (x/2)^(2m+2) / (m!(m+2)!)
+    Delegates to ``scipy.special.jv`` (compiled C, accurate for all x).
+    The function name is kept for backward compatibility.
     """
-    x = np.asarray(x, dtype=np.complex128)
-
-    max_abs = float(np.max(np.abs(x)))
-    if max_abs < 5:
-        M = 50
-    elif max_abs < 20:
-        M = 120
-    else:
-        M = 220
-
-    out = np.zeros_like(x, dtype=np.complex128)
-
-    # term for m=0: (x/2)^2 / (0! * 2!) = x^2 / 8
-    term = (x * x) / 8.0
-    out += term
-
-    # recurrence for term_{m} -> term_{m+1}
-    # term_{m+1} = term_m * [-(x^2/4)] / [(m+1)(m+3)]
-    x2_over_4 = (x * x) / 4.0
-    for m in range(0, M - 1):
-        term *= (-x2_over_4) / ((m + 1) * (m + 3))
-        out += term
-
-    return out
+    return jv(2, np.asarray(x, dtype=np.complex128))
 
 def gauss_legendre(n: int, a: float = -1.0, b: float = 1.0):
     """
@@ -126,6 +91,7 @@ def gyy_TE_rho(
     kps, wts = gauss_legendre(num_k, a=0.0, b=k_parallel_max)
 
     # --- Vectorised batch calls (all kp values at once) ---
+    # Green's function engines use NumPy (complex arithmetic)
     Gyykp = gyy_TE(
         n_list, d_list,
         layer_src, z_src,
@@ -161,34 +127,53 @@ def gyy_TE_rho(
         k0, kps
     )
 
-    # --- Bessel factor ---
+    # --- Bessel factor (scipy, compiled C) ---
     J0 = J0_series(kps * rho)
     J2 = J2_series(kps * rho)
+
+    # --- Move to accelerated backend for integrand assembly ---
+    # On Apple Silicon with MLX this runs on the GPU;
+    # otherwise xp is just numpy and from_numpy/to_numpy are no-ops.
+    _kps   = from_numpy(kps)
+    _wts   = from_numpy(wts)
+    _J0    = from_numpy(J0)
+    _J2    = from_numpy(J2)
+    _Gyy   = from_numpy(Gyykp)
+    _DGyy  = from_numpy(np.conj(DGyykp))
+    _Gxx   = from_numpy(Gxxkp)
+    _DGxx  = from_numpy(np.conj(DGxxkp))
+    _Gzx_c = from_numpy(np.conj(Gzxkp))
+
     pref = 1.0 / np.pi
+    _kps2 = _kps * _kps
 
-    # --- integrands ---
-    integrand_1 = kps * J0 * Gyykp
-    integrand_2 = kps * J0 * np.conj(DGyykp)
-    integrand_3 = kps * J2 * Gyykp
-    integrand_4 = kps * J2 * np.conj(DGyykp)
-    integrand_5 = kps * J0 * Gxxkp
-    integrand_6 = kps * J0 * np.conj(DGxxkp)
-    integrand_7 = kps * J2 * Gxxkp
-    integrand_8 = kps * J2 * np.conj(DGxxkp)
-    integrand_9 = kps**2 * J0 * np.conj(Gzxkp)
-    integrand_10 = kps**2 * J2 * np.conj(Gzxkp)
+    # --- integrands (accelerated element-wise ops) ---
+    ig1  = _kps * _J0 * _Gyy
+    ig2  = _kps * _J0 * _DGyy
+    ig3  = _kps * _J2 * _Gyy
+    ig4  = _kps * _J2 * _DGyy
+    ig5  = _kps * _J0 * _Gxx
+    ig6  = _kps * _J0 * _DGxx
+    ig7  = _kps * _J2 * _Gxx
+    ig8  = _kps * _J2 * _DGxx
+    ig9  = _kps2 * _J0 * _Gzx_c
+    ig10 = _kps2 * _J2 * _Gzx_c
 
-    # --- Gauss-Legendre weighted sums ---
-    I1 = pref * np.dot(wts, integrand_1)
-    I2 = pref * np.dot(wts, integrand_2)
-    I3 = pref * np.dot(wts, integrand_3)
-    I4 = pref * np.dot(wts, integrand_4)
-    I5 = pref * np.dot(wts, integrand_5)
-    I6 = pref * np.dot(wts, integrand_6)
-    I7 = pref * np.dot(wts, integrand_7)
-    I8 = pref * np.dot(wts, integrand_8)
-    I9 = pref * np.dot(wts, integrand_9)
-    I10 = pref * np.dot(wts, integrand_10)
+    # --- Gauss-Legendre weighted sums (accelerated dot) ---
+    I1  = pref * xp.dot(_wts, ig1)
+    I2  = pref * xp.dot(_wts, ig2)
+    I3  = pref * xp.dot(_wts, ig3)
+    I4  = pref * xp.dot(_wts, ig4)
+    I5  = pref * xp.dot(_wts, ig5)
+    I6  = pref * xp.dot(_wts, ig6)
+    I7  = pref * xp.dot(_wts, ig7)
+    I8  = pref * xp.dot(_wts, ig8)
+    I9  = pref * xp.dot(_wts, ig9)
+    I10 = pref * xp.dot(_wts, ig10)
+
+    # --- combine (back to Python scalars) ---
+    I1, I2, I3, I4, I5 = complex(I1), complex(I2), complex(I3), complex(I4), complex(I5)
+    I6, I7, I8, I9, I10 = complex(I6), complex(I7), complex(I8), complex(I9), complex(I10)
     return I1*I2 + I3*I4 + I5*I6 + I7*I8 + 1j*I5*I9 + 1j*I5*I10 + I5*I2 + I7*I4 + I1*I6 + I3*I8 + 1j*I1*I9 + 1j*I1*I10
 
 def demo_plot_TE():
