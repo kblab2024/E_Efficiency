@@ -6,7 +6,7 @@ Design goal (your workflow):
     - This file ONLY:
         (1) imports te_greens.gyy_TE (and later TM engines)
         (2) performs angular integration -> Bessel J0
-        (3) performs k_parallel radial integral
+        (3) performs k_parallel radial integral (Gauss-Legendre quadrature)
         (4) plots results
 using only numpy and matplotlib (no scipy).
 
@@ -95,6 +95,48 @@ def J2_series(x: np.ndarray) -> np.ndarray:
 
     return out
 
+def gauss_legendre(n: int, a: float = -1.0, b: float = 1.0):
+    """
+    Gauss-Legendre quadrature nodes and weights on [a, b].
+
+    Uses Newton-Raphson iteration on Legendre polynomials (no scipy).
+    Returns (nodes, weights) arrays of length *n*.
+    """
+    nodes = np.empty(n, dtype=float)
+    weights = np.empty(n, dtype=float)
+    m = (n + 1) // 2
+
+    for i in range(m):
+        # Initial guess for the i-th root (Abramowitz & Stegun approx)
+        z = np.cos(np.pi * (i + 0.75) / (n + 0.5))
+
+        for _ in range(100):
+            p1, p2 = 1.0, 0.0
+            for k in range(1, n + 1):
+                p3 = p2
+                p2 = p1
+                p1 = ((2.0 * k - 1.0) * z * p2 - (k - 1.0) * p3) / k
+
+            # derivative of Legendre polynomial
+            pp = n * (z * p1 - p2) / (z * z - 1.0)
+            z1 = z
+            z = z1 - p1 / pp
+            if abs(z - z1) < 1e-15:
+                break
+
+        nodes[i] = -z
+        nodes[n - 1 - i] = z
+        weights[i] = 2.0 / ((1.0 - z * z) * pp * pp)
+        weights[n - 1 - i] = weights[i]
+
+    # transform from [-1, 1] to [a, b]
+    scale = (b - a) / 2.0
+    shift = (a + b) / 2.0
+    nodes = shift + scale * nodes
+    weights = weights * scale
+
+    return nodes, weights
+
 def gyy_TE_rho(
     n_list,
     d_list,
@@ -106,20 +148,10 @@ def gyy_TE_rho(
     rho: float,
     k_parallel_max: float,
     num_k: int,
-    use_trapz: bool = False,
 ) -> complex:
 
-    # --- choose grid ---
-    if use_trapz:
-        # midpoint grid (avoid hitting branch point exactly)
-        dk  = k_parallel_max / num_k
-        kps = (np.arange(num_k, dtype=float) + 0.5) * dk
-    else:
-        # endpoint grid required for Simpson's rule
-        if num_k % 2 == 0:
-            raise ValueError("Simpson needs odd num_k. Set num_k to an odd integer or use_trapz=True.")
-        kps = np.linspace(0.0, k_parallel_max, num_k)
-        kps[0] = kps[1] * 1e-6  # nudge away from 0 to avoid branch-point singularity
+    # --- Gauss-Legendre nodes and weights on (0, k_parallel_max) ---
+    kps, wts = gauss_legendre(num_k, a=0.0, b=k_parallel_max)
 
     # --- Vectorised batch calls (all kp values at once) ---
     Gyykp = gyy_TE(
@@ -162,7 +194,7 @@ def gyy_TE_rho(
     J2 = J2_series(kps * rho)
     pref = 1.0 / np.pi
 
-    # --- two integrands ---
+    # --- integrands ---
     integrand_1 = kps * J0 * Gyykp
     integrand_2 = kps * J0 * np.conj(DGyykp)
     integrand_3 = kps * J2 * Gyykp
@@ -174,41 +206,17 @@ def gyy_TE_rho(
     integrand_9 = kps**2 * J0 * np.conj(Gzxkp)
     integrand_10 = kps**2 * J2 * np.conj(Gzxkp)
 
-    # --- integrate ---
-    if use_trapz:
-        I1 = pref * np.trapezoid(integrand_1, kps)
-        I2 = pref * np.trapezoid(integrand_2, kps)
-        I3 = pref * np.trapezoid(integrand_3, kps)
-        I4 = pref * np.trapezoid(integrand_4, kps)
-        I5 = pref * np.trapezoid(integrand_5, kps)
-        I6 = pref * np.trapezoid(integrand_6, kps)
-        I7 = pref * np.trapezoid(integrand_7, kps)
-        I8 = pref * np.trapezoid(integrand_8, kps)
-        I9 = pref * np.trapezoid(integrand_9, kps)
-        I10 = pref * np.trapezoid(integrand_10, kps)
-        return I1*I2 + I3*I4 + I5*I6 + I7*I8 + 1j*I5*I9 + 1j*I5*I10 + I5*I2 + I7*I4 + I1*I6+ I3*I8 + 1j*I1*I9 + 1j*I1*I10
-
-    h = (k_parallel_max - 0.0) / (num_k - 1)
-    S1 = integrand_1[0] + integrand_1[-1] + 4.0 * np.sum(integrand_1[1:-1:2]) + 2.0 * np.sum(integrand_1[2:-2:2])
-    S2 = integrand_2[0] + integrand_2[-1] + 4.0 * np.sum(integrand_2[1:-1:2]) + 2.0 * np.sum(integrand_2[2:-2:2])
-    S3 = integrand_3[0] + integrand_3[-1] + 4.0 * np.sum(integrand_3[1:-1:2]) + 2.0 * np.sum(integrand_3[2:-2:2])
-    S4 = integrand_4[0] + integrand_4[-1] + 4.0 * np.sum(integrand_4[1:-1:2]) + 2.0 * np.sum(integrand_4[2:-2:2])
-    S5 = integrand_5[0] + integrand_5[-1] + 4.0 * np.sum(integrand_5[1:-1:2]) + 2.0 * np.sum(integrand_5[2:-2:2])
-    S6 = integrand_6[0] + integrand_6[-1] + 4.0 * np.sum(integrand_6[1:-1:2]) + 2.0 * np.sum(integrand_6[2:-2:2])
-    S7 = integrand_7[0] + integrand_7[-1] + 4.0 * np.sum(integrand_7[1:-1:2]) + 2.0 * np.sum(integrand_7[2:-2:2])
-    S8 = integrand_8[0] + integrand_8[-1] + 4.0 * np.sum(integrand_8[1:-1:2]) + 2.0 * np.sum(integrand_8[2:-2:2])
-    S9 = integrand_9[0] + integrand_9[-1] + 4.0 * np.sum(integrand_9[1:-1:2]) + 2.0 * np.sum(integrand_9[2:-2:2])
-    S10 = integrand_10[0] + integrand_10[-1] + 4.0 * np.sum(integrand_10[1:-1:2]) + 2.0 * np.sum(integrand_10[2:-2:2])  
-    I1 = pref * (h / 3.0) * S1
-    I2 = pref * (h / 3.0) * S2
-    I3 = pref * (h / 3.0) * S3
-    I4 = pref * (h / 3.0) * S4
-    I5 = pref * (h / 3.0) * S5
-    I6 = pref * (h / 3.0) * S6
-    I7 = pref * (h / 3.0) * S7
-    I8 = pref * (h / 3.0) * S8
-    I9 = pref * (h / 3.0) * S9
-    I10 = pref * (h / 3.0) * S10
+    # --- Gauss-Legendre weighted sums ---
+    I1 = pref * np.dot(wts, integrand_1)
+    I2 = pref * np.dot(wts, integrand_2)
+    I3 = pref * np.dot(wts, integrand_3)
+    I4 = pref * np.dot(wts, integrand_4)
+    I5 = pref * np.dot(wts, integrand_5)
+    I6 = pref * np.dot(wts, integrand_6)
+    I7 = pref * np.dot(wts, integrand_7)
+    I8 = pref * np.dot(wts, integrand_8)
+    I9 = pref * np.dot(wts, integrand_9)
+    I10 = pref * np.dot(wts, integrand_10)
     return I1*I2 + I3*I4 + I5*I6 + I7*I8 + 1j*I5*I9 + 1j*I5*I10 + I5*I2 + I7*I4 + I1*I6 + I3*I8 + 1j*I1*I9 + 1j*I1*I10
 
 def demo_plot_TE():
@@ -234,7 +242,7 @@ def demo_plot_TE():
     # k_parallel integration setup (edit)
     # Typical: some multiple of k0. For evanescent contributions, you may need larger.
     k_parallel_max = 3.5 * k0
-    num_k = 2001  # odd recommended if you switch to Simpson
+    num_k = 100  # Gauss-Legendre quadrature points
 
     rhos = np.linspace(0.0, 1.30, 500)
 
@@ -247,7 +255,6 @@ def demo_plot_TE():
             rho=float(r),
             k_parallel_max=k_parallel_max,
             num_k=num_k,
-            use_trapz=False,
         )
         for r in rhos
     ], dtype=np.complex128)
