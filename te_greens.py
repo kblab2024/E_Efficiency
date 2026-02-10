@@ -22,9 +22,14 @@ from multilayer_reflectance import RF_multilayer, RB_multilayer
 # Level 1: q(k_parallel) per layer
 # ------------------------------------------------------------
 def compute_q_list(n_list, k0, kp):
-    """  Return q_list for all layers."""
-    eps_list = np.array(n_list)**2
-    q_list = np.sqrt(kp**2 - eps_list * k0**2 + 0j) / k0
+    """Return q_list for all layers.
+
+    If *kp* is an array of shape ``(M,)``, the result has shape
+    ``(N, M)`` where ``N = len(n_list)``.
+    """
+    eps_list = np.array(n_list, dtype=complex)[:, None] ** 2  # (N,1)
+    kp = np.atleast_1d(np.asarray(kp, dtype=complex))        # (M,)
+    q_list = np.sqrt(kp**2 - eps_list * k0**2 + 0j) / k0     # (N,M)
     return q_list
 
 def compute_interface_params_up_down(n_list, d_list, k0, kp, polarization="TE"):
