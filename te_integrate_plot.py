@@ -8,7 +8,7 @@ Design goal (your workflow):
         (2) performs angular integration -> Bessel J0
         (3) performs k_parallel radial integral (Gauss-Legendre quadrature)
         (4) plots results
-using only numpy and matplotlib (no scipy).
+using numpy, matplotlib, and scipy.
 
 Math (2D in-plane Fourier/Bessel transform):
     G_yy(rho) = (1/(2π)) ∫_0^{∞} k_parallel * J0(k_parallel*rho) * G_yy(k_parallel) dk_parallel
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.special import roots_legendre
 
 # You will keep modifying te_greens.py; we import from it on purpose.
 from te_greens import gyy_TE
@@ -99,43 +100,14 @@ def gauss_legendre(n: int, a: float = -1.0, b: float = 1.0):
     """
     Gauss-Legendre quadrature nodes and weights on [a, b].
 
-    Uses Newton-Raphson iteration on Legendre polynomials (no scipy).
+    Uses scipy.special.roots_legendre for nodes/weights on [-1, 1],
+    then linearly transforms to [a, b].
     Returns (nodes, weights) arrays of length *n*.
     """
-    nodes = np.empty(n, dtype=float)
-    weights = np.empty(n, dtype=float)
-    m = (n + 1) // 2
-
-    for i in range(m):
-        # Initial guess for the i-th root (Abramowitz & Stegun approx)
-        z = np.cos(np.pi * (i + 0.75) / (n + 0.5))
-
-        for _ in range(100):
-            p1, p2 = 1.0, 0.0
-            for k in range(1, n + 1):
-                p3 = p2
-                p2 = p1
-                p1 = ((2.0 * k - 1.0) * z * p2 - (k - 1.0) * p3) / k
-
-            # derivative of Legendre polynomial
-            pp = n * (z * p1 - p2) / (z * z - 1.0)
-            z1 = z
-            z = z1 - p1 / pp
-            if abs(z - z1) < 1e-15:
-                break
-
-        nodes[i] = -z
-        nodes[n - 1 - i] = z
-        weights[i] = 2.0 / ((1.0 - z * z) * pp * pp)
-        weights[n - 1 - i] = weights[i]
-
-    # transform from [-1, 1] to [a, b]
+    xi, wi = roots_legendre(n)
     scale = (b - a) / 2.0
     shift = (a + b) / 2.0
-    nodes = shift + scale * nodes
-    weights = weights * scale
-
-    return nodes, weights
+    return shift + scale * xi, wi * scale
 
 def gyy_TE_rho(
     n_list,
