@@ -1,8 +1,9 @@
 ! Makefile for compiling Fortran optics codes
+! Supports OpenMP for CPU parallelism on multi-core CPUs (e.g. Xeon w5-3423)
 
 FC = gfortran
-FFLAGS = -O2 -Wall -std=f2008
-LDFLAGS = 
+FFLAGS = -O2 -Wall -std=f2008 -fopenmp
+LDFLAGS = -fopenmp
 
 # List of modules (order matters for dependencies)
 MODULES = multilayer_reflectance.o te_greens.o tm_greens.o bessel_functions.o \

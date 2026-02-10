@@ -10,6 +10,11 @@ Design goal (your workflow):
         (4) plots results
 using only numpy and matplotlib (no scipy).
 
+GPU acceleration:
+    All k_parallel evaluations are batched into a single vectorised call.
+    When CuPy is available (NVIDIA GPU), the entire batch runs on the GPU.
+    Otherwise NumPy is used on the CPU.
+
 Math (2D in-plane Fourier/Bessel transform):
     G_yy(rho) = (1/(2π)) ∫_0^{∞} k_parallel * J0(k_parallel*rho) * G_yy(k_parallel) dk_parallel
 
@@ -24,6 +29,8 @@ from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 
+from gpu_config import xp, to_numpy, trapz
+
 # You will keep modifying te_greens.py; we import from it on purpose.
 from te_greens import gyy_TE
 from te_greens import dgyy_dzobs_TE
@@ -32,7 +39,7 @@ from tm_greens import dgxx_dzobs_TM
 from tm_greens import gzx_TM
 
 
-def J0_series(x: np.ndarray) -> np.ndarray:
+def J0_series(x):
     """
     Minimal, dependency-free J0(x) approximation (series, stable for small/moderate x).
 
@@ -40,13 +47,14 @@ def J0_series(x: np.ndarray) -> np.ndarray:
 
     This is fine for plotting / debugging. If you later want faster & more accurate:
         - use scipy.special.j0
+
+    Works with both NumPy and CuPy arrays.
     """
-    x = np.asarray(x, dtype=np.complex128)
+    x = xp.asarray(x, dtype=xp.complex128)
     x2_over_4 = (x * x) / 4.0
 
     # Adaptive-ish truncation: more terms for larger |x|
-    # (still cheap, but don't go crazy)
-    max_abs = float(np.max(np.abs(x)))
+    max_abs = float(xp.max(xp.abs(x)))
     if max_abs < 5:
         M = 40
     elif max_abs < 20:
@@ -54,23 +62,25 @@ def J0_series(x: np.ndarray) -> np.ndarray:
     else:
         M = 140
 
-    out = np.zeros_like(x, dtype=np.complex128)
-    term = np.ones_like(x, dtype=np.complex128)
+    out = xp.zeros_like(x, dtype=xp.complex128)
+    term = xp.ones_like(x, dtype=xp.complex128)
     out += term
     for m in range(1, M):
         term *= (-x2_over_4) / (m * m)
         out += term
     return out
 
-def J2_series(x: np.ndarray) -> np.ndarray:
+def J2_series(x):
     """
     Minimal, dependency-free J2(x) approximation (series).
 
     J2(x) = Σ_{m=0}^∞ (-1)^m (x/2)^(2m+2) / (m!(m+2)!)
-    """
-    x = np.asarray(x, dtype=np.complex128)
 
-    max_abs = float(np.max(np.abs(x)))
+    Works with both NumPy and CuPy arrays.
+    """
+    x = xp.asarray(x, dtype=xp.complex128)
+
+    max_abs = float(xp.max(xp.abs(x)))
     if max_abs < 5:
         M = 50
     elif max_abs < 20:
@@ -78,7 +88,7 @@ def J2_series(x: np.ndarray) -> np.ndarray:
     else:
         M = 220
 
-    out = np.zeros_like(x, dtype=np.complex128)
+    out = xp.zeros_like(x, dtype=xp.complex128)
 
     # term for m=0: (x/2)^2 / (0! * 2!) = x^2 / 8
     term = (x * x) / 8.0
@@ -110,84 +120,46 @@ def gyy_TE_rho(
     # --- midpoint grid (avoid hitting branch point exactly) ---
     dk  = k_parallel_max / num_k
     kps = (np.arange(num_k, dtype=float) + 0.5) * dk
+    kps_dev = xp.asarray(kps)
 
-    # --- Gyy(kp) ---
-    Gyykp = np.empty_like(kps, dtype=np.complex128)
-    for i, kp in enumerate(kps):
-        Gyykp[i] = gyy_TE(
-            n_list, d_list,
-            layer_src, z_src,
-            layer_obs, z_obs,
-            k0, kp
-        )
-
-    # --- d/dz_obs Gyy(kp) ---
-    DGyykp = np.empty_like(kps, dtype=np.complex128)
-    for i, kp in enumerate(kps):
-        DGyykp[i] = dgyy_dzobs_TE(
-            n_list, d_list,
-            layer_src, z_src,
-            layer_obs, z_obs,
-            k0, kp
-        )
-
-    Gxxkp = np.empty_like(kps, dtype=np.complex128)
-    for i, kp in enumerate(kps):
-        Gxxkp[i] = gxx_TM(
-             n_list, d_list,
-            layer_src, z_src,
-             layer_obs, z_obs,
-             k0, kp
-        )
-
-    DGxxkp = np.empty_like(kps, dtype=np.complex128)
-    for i, kp in enumerate(kps):
-        DGxxkp[i] = dgxx_dzobs_TM(
-            n_list, d_list,
-            layer_src, z_src,
-            layer_obs, z_obs,
-            k0, kp
-        )
-
-    Gzxkp = np.empty_like(kps, dtype=np.complex128)
-    for i, kp in enumerate(kps):
-        Gzxkp[i] = gzx_TM(
-            n_list, d_list,
-            layer_src, z_src,
-            layer_obs, z_obs,
-            k0, kp
-        )
+    # --- Batch-evaluate all Green's functions at once (GPU-accelerated) ---
+    Gyykp  = gyy_TE(n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kps_dev)
+    DGyykp = dgyy_dzobs_TE(n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kps_dev)
+    Gxxkp  = gxx_TM(n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kps_dev)
+    DGxxkp = dgxx_dzobs_TM(n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kps_dev)
+    Gzxkp  = gzx_TM(n_list, d_list, layer_src, z_src, layer_obs, z_obs, k0, kps_dev)
 
     # --- Bessel factor ---
-    J0 = J0_series(kps * rho)
-    J2 = J2_series(kps * rho)
-    pref = 1.0 / np.pi
+    J0 = J0_series(kps_dev * rho)
+    J2 = J2_series(kps_dev * rho)
+    pref = 1.0 / xp.asarray(np.pi)
 
     # --- two integrands ---
-    integrand_1 = kps * J0 * Gyykp
-    integrand_2 = kps * J0 * np.conj(DGyykp)
-    integrand_3 = kps * J2 * Gyykp
-    integrand_4 = kps * J2 * np.conj(DGyykp)
-    integrand_5 = kps * J0 * Gxxkp
-    integrand_6 = kps * J0 * np.conj(DGxxkp)
-    integrand_7 = kps * J2 * Gxxkp
-    integrand_8 = kps * J2 * np.conj(DGxxkp)
-    integrand_9 = kps**2 * J0 * np.conj(Gzxkp)
-    integrand_10 = kps**2 * J2 * np.conj(Gzxkp)
+    integrand_1 = kps_dev * J0 * Gyykp
+    integrand_2 = kps_dev * J0 * xp.conj(DGyykp)
+    integrand_3 = kps_dev * J2 * Gyykp
+    integrand_4 = kps_dev * J2 * xp.conj(DGyykp)
+    integrand_5 = kps_dev * J0 * Gxxkp
+    integrand_6 = kps_dev * J0 * xp.conj(DGxxkp)
+    integrand_7 = kps_dev * J2 * Gxxkp
+    integrand_8 = kps_dev * J2 * xp.conj(DGxxkp)
+    integrand_9 = kps_dev**2 * J0 * xp.conj(Gzxkp)
+    integrand_10 = kps_dev**2 * J2 * xp.conj(Gzxkp)
 
     # --- integrate ---
     if use_trapz:
-        I1 = pref * np.trapz(integrand_1, kps)
-        I2 = pref * np.trapz(integrand_2, kps)
-        I3 = pref * np.trapz(integrand_3, kps)  
-        I4 = pref * np.trapz(integrand_4, kps)
-        I5 = pref * np.trapz(integrand_5, kps)
-        I6 = pref * np.trapz(integrand_6, kps)
-        I7 = pref * np.trapz(integrand_7, kps)
-        I8 = pref * np.trapz(integrand_8, kps)
-        I9 = pref * np.trapz(integrand_9, kps)
-        I10 = pref * np.trapz(integrand_10, kps)
-        return I1*I2 + I3*I4 + I5*I6 + I7*I8 + 1j*I5*I9 + 1j*I5*I10 + I5*I2 + I7*I4 + I1*I6+ I3*I8 + 1j*I1*I9 + 1j*I1*I10   
+        I1 = pref * trapz(integrand_1, kps_dev)
+        I2 = pref * trapz(integrand_2, kps_dev)
+        I3 = pref * trapz(integrand_3, kps_dev)  
+        I4 = pref * trapz(integrand_4, kps_dev)
+        I5 = pref * trapz(integrand_5, kps_dev)
+        I6 = pref * trapz(integrand_6, kps_dev)
+        I7 = pref * trapz(integrand_7, kps_dev)
+        I8 = pref * trapz(integrand_8, kps_dev)
+        I9 = pref * trapz(integrand_9, kps_dev)
+        I10 = pref * trapz(integrand_10, kps_dev)
+        result = I1*I2 + I3*I4 + I5*I6 + I7*I8 + 1j*I5*I9 + 1j*I5*I10 + I5*I2 + I7*I4 + I1*I6+ I3*I8 + 1j*I1*I9 + 1j*I1*I10
+        return complex(to_numpy(result))
 
     # If you ever turn on Simpson later, you'd want an endpoint grid (not midpoint).
     # For now keep your original guard:
@@ -195,16 +167,16 @@ def gyy_TE_rho(
         raise ValueError("Simpson needs odd num_k. Set num_k to an odd integer or use_trapz=True.")
 
     h = (k_parallel_max - 0.0) / (num_k - 1)  # 你說今晚先別管它 OK
-    S1 = integrand_1[0] + integrand_1[-1] + 4.0 * np.sum(integrand_1[1:-1:2]) + 2.0 * np.sum(integrand_1[2:-2:2])
-    S2 = integrand_2[0] + integrand_2[-1] + 4.0 * np.sum(integrand_2[1:-1:2]) + 2.0 * np.sum(integrand_2[2:-2:2])
-    S3 = integrand_3[0] + integrand_3[-1] + 4.0 * np.sum(integrand_3[1:-1:2]) + 2.0 * np.sum(integrand_3[2:-2:2])
-    S4 = integrand_4[0] + integrand_4[-1] + 4.0 * np.sum(integrand_4[1:-1:2]) + 2.0 * np.sum(integrand_4[2:-2:2])
-    S5 = integrand_5[0] + integrand_5[-1] + 4.0 * np.sum(integrand_5[1:-1:2]) + 2.0 * np.sum(integrand_5[2:-2:2])
-    S6 = integrand_6[0] + integrand_6[-1] + 4.0 * np.sum(integrand_6[1:-1:2]) + 2.0 * np.sum(integrand_6[2:-2:2])
-    S7 = integrand_7[0] + integrand_7[-1] + 4.0 * np.sum(integrand_7[1:-1:2]) + 2.0 * np.sum(integrand_7[2:-2:2])
-    S8 = integrand_8[0] + integrand_8[-1] + 4.0 * np.sum(integrand_8[1:-1:2]) + 2.0 * np.sum(integrand_8[2:-2:2])
-    S9 = integrand_9[0] + integrand_9[-1] + 4.0 * np.sum(integrand_9[1:-1:2]) + 2.0 * np.sum(integrand_9[2:-2:2])
-    S10 = integrand_10[0] + integrand_10[-1] + 4.0 * np.sum(integrand_10[1:-1:2]) + 2.0 * np.sum(integrand_10[2:-2:2])  
+    S1 = integrand_1[0] + integrand_1[-1] + 4.0 * xp.sum(integrand_1[1:-1:2]) + 2.0 * xp.sum(integrand_1[2:-2:2])
+    S2 = integrand_2[0] + integrand_2[-1] + 4.0 * xp.sum(integrand_2[1:-1:2]) + 2.0 * xp.sum(integrand_2[2:-2:2])
+    S3 = integrand_3[0] + integrand_3[-1] + 4.0 * xp.sum(integrand_3[1:-1:2]) + 2.0 * xp.sum(integrand_3[2:-2:2])
+    S4 = integrand_4[0] + integrand_4[-1] + 4.0 * xp.sum(integrand_4[1:-1:2]) + 2.0 * xp.sum(integrand_4[2:-2:2])
+    S5 = integrand_5[0] + integrand_5[-1] + 4.0 * xp.sum(integrand_5[1:-1:2]) + 2.0 * xp.sum(integrand_5[2:-2:2])
+    S6 = integrand_6[0] + integrand_6[-1] + 4.0 * xp.sum(integrand_6[1:-1:2]) + 2.0 * xp.sum(integrand_6[2:-2:2])
+    S7 = integrand_7[0] + integrand_7[-1] + 4.0 * xp.sum(integrand_7[1:-1:2]) + 2.0 * xp.sum(integrand_7[2:-2:2])
+    S8 = integrand_8[0] + integrand_8[-1] + 4.0 * xp.sum(integrand_8[1:-1:2]) + 2.0 * xp.sum(integrand_8[2:-2:2])
+    S9 = integrand_9[0] + integrand_9[-1] + 4.0 * xp.sum(integrand_9[1:-1:2]) + 2.0 * xp.sum(integrand_9[2:-2:2])
+    S10 = integrand_10[0] + integrand_10[-1] + 4.0 * xp.sum(integrand_10[1:-1:2]) + 2.0 * xp.sum(integrand_10[2:-2:2])  
     I1 = pref * (h / 3.0) * S1
     I2 = pref * (h / 3.0) * S2
     I3 = pref * (h / 3.0) * S3
@@ -215,7 +187,8 @@ def gyy_TE_rho(
     I8 = pref * (h / 3.0) * S8
     I9 = pref * (h / 3.0) * S9
     I10 = pref * (h / 3.0) * S10
-    return I1*I2 + I3*I4 + I5*I6 + I7*I8 + 1j*I5*I9 + 1j*I5*I10 + I5*I2 + I7*I4 + I1*I6 + I3*I8 + 1j*I1*I9 + 1j*I1*I10
+    result = I1*I2 + I3*I4 + I5*I6 + I7*I8 + 1j*I5*I9 + 1j*I5*I10 + I5*I2 + I7*I4 + I1*I6 + I3*I8 + 1j*I1*I9 + 1j*I1*I10
+    return complex(to_numpy(result))
 
 def demo_plot_TE():
     """

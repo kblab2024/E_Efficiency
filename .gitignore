@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Fortran
+*.o
+*.mod
+*.dat
+fortran/test_multilayer
+fortran/test_te_greens
+fortran/test_tm_greens
+fortran/main_te_integrate
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/

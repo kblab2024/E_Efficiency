@@ -59,7 +59,7 @@ contains
         G_rho = integral
     end function gyy_TE_rho
 
-    ! Compute G_yy(rho) for an array of rho values
+    ! Compute G_yy(rho) for an array of rho values (OpenMP parallel)
     subroutine gyy_TE_rho_array(n_list, d_list, N, layer_src, z_src, layer_obs, z_obs, &
                                 k0, rho_arr, n_rho, k_parallel_max, n_gauss, safety_factor, &
                                 G_rho_arr)
@@ -70,11 +70,13 @@ contains
         
         integer :: i
         
+        !$omp parallel do default(shared) private(i) schedule(dynamic)
         do i = 1, n_rho
             G_rho_arr(i) = gyy_TE_rho(n_list, d_list, N, layer_src, z_src, &
                                       layer_obs, z_obs, k0, rho_arr(i), &
                                       k_parallel_max, n_gauss, safety_factor)
         end do
+        !$omp end parallel do
     end subroutine gyy_TE_rho_array
 
 end module te_integrate
@@ -82,6 +84,7 @@ end module te_integrate
 ! Main program for TE integration demo
 program main_te_integrate
     use te_integrate
+    !$ use omp_lib
     implicit none
     
     integer, parameter :: N = 4, n_rho = 100, n_gauss = 32
@@ -121,6 +124,7 @@ program main_te_integrate
     print *, 'Computing G_yy(rho) using split Gauss quadrature...'
     print *, 'Number of Gauss points per interval:', n_gauss
     print *, 'Safety factor:', safety_factor
+    !$ print *, 'OpenMP threads:', omp_get_max_threads()
     print *, ''
     
     call gyy_TE_rho_array(n_list, d_list, N, layer_src, z_src, layer_obs, z_obs, &
